@@ -1,0 +1,6 @@
+Package: printerservice
+Version: 0.1
+Maintainer: Nikolay Antipov
+Architecture: all
+Description: Inkless printer service
+
