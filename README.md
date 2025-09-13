@@ -11,7 +11,7 @@
 $ dpkg-deb --build helloworld
 
 gofmt -s -w .
-go build -o bin  cmd/egg_server.go 
-bin/egg_server
+go build -o bin  cmd/printerservice.go 
+bin/printerservice
 
 ```

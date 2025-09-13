@@ -4,12 +4,17 @@ import (
 	"log"
 	"nantipov/printerservice/internal"
 	"nantipov/printerservice/internal/machine/grbl"
+	"nantipov/printerservice/internal/printingdata"
+	"sync"
 
 	"go.bug.st/serial"
 )
 
 var (
-	port serial.Port
+	port         serial.Port
+	readyToPrint bool = false //todo: atomic?
+	machineMutex sync.RWMutex
+	currentJob   *printingdata.Job
 )
 
 func Init() {
@@ -24,10 +29,27 @@ func Init() {
 		log.Printf("machine firmware version mismatch: available: %s, installed: %s", settings.GrblDeviceFirmwareVersion, version)
 		updateFirmware()
 	}
+
+	readyToPrint = true
 }
 
-// todo: revisit naming
-func IsFree() bool {
+//todo: consider atomic printing - e.g. printIfReady() bool
+// func IsReadyForPrint() bool {
+// 	taskMutex.RLock()
+// 	defer taskMutex.RUnlock()
+// 	return readyToPrint
+// }
+
+func PrintIfReady(job *printingdata.Job) bool {
+	machineMutex.Lock()
+	defer machineMutex.Unlock()
+
+	if !readyToPrint {
+		return false
+	}
+
+	readyToPrint = false
+	currentJob = job
 	return true
 }
 
