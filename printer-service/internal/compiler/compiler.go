@@ -1,10 +1,12 @@
 package compiler
 
 import (
-	"log"
+	"errors"
 	"nantipov/printerservice/internal/printingdata"
+)
 
-	"seehuhn.de/go/pdf"
+var (
+	ErrorNoSuitableSketcher = errors.New("unknown document type")
 )
 
 //todo: naming
@@ -16,18 +18,22 @@ func Compile(job *printingdata.Job) {
 	//todo: interate over documents in the job
 	//todo: depending on mime type, consider different readers
 
-	opt := &pdf.ReaderOptions{}
-	reader, err := pdf.Open("/tmp/f.pdf", opt) //todo: read from Job/Task
-
-	if err != nil {
-		log.Fatalf("could not open PDF file: %s", err.Error())
-		//todo: store error to Job/Task and switch processing state
+	for _, document := range job.Ipp.Documents {
+		pages, _ := sketch(document) // todo: handle error
+		job.Pages = append(job.Pages, pages...)
 	}
 
-	defer reader.Close()
-
-	// reader.GetMeta().Catalog.Pages
-	// https://github.com/seehuhn/go-pdf/blob/main/examples/pdf-extract-text/main.go
-
 	job.SetState(printingdata.JobStateCompiled)
+}
+
+func sketch(document printingdata.IppDocument) ([]*printingdata.SketchedPage, error) {
+	switch document.DocumentType {
+	case printingdata.DocumentTypePDF:
+		return sketchFromPdf(document)
+	case printingdata.DocumentTypeRaster:
+		return sketchFromRaster(document)
+	default:
+		return nil, ErrorNoSuitableSketcher
+	}
+	//todo: check if a sketcher should be an interface?
 }

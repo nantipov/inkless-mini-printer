@@ -20,6 +20,8 @@ var (
 func Init() {
 	settings := internal.GetSettings()
 
+	return
+
 	connect()
 	version := grbl.GetVersion(port)
 

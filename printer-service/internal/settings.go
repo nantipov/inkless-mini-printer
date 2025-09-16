@@ -26,7 +26,9 @@ func LoadSetting() {
 }
 
 func GetSettings() Settings {
+	settings.WebPort = 8080 //todo: dev mode?
 	return settings
 }
+
 
 //todo: accept absolute dirs (app and data) from env variables and rest keep in json file?

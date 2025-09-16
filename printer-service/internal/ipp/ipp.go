@@ -1,15 +1,23 @@
 package ipp
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path"
 
 	"github.com/OpenPrinting/goipp"
+	"github.com/google/uuid"
 
 	"nantipov/printerservice/internal"
 	"nantipov/printerservice/internal/jobprocessor"
+	"nantipov/printerservice/internal/printingdata"
+)
+
+const (
+	dirTmp = "/tmp"
 )
 
 var (
@@ -94,7 +102,11 @@ func printJob(request *goipp.Message, httpPayloadReader io.Reader) *goipp.Messag
 	response.Job.Add(goipp.MakeAttribute("job-state-reasons", goipp.TagKeyword, goipp.String("none")))
 	response.Job.Add(goipp.MakeAttribute("job-state-message", goipp.TagText, goipp.String("Looking...")))
 
-	f, err := os.Create("/tmp/f.pdf")
+	//todo: Jobs dir from Settings
+	filename := path.Join(dirTmp, fmt.Sprintf("%s.pdf", uuid.NewString()))
+	f, err := os.Create(filename)
+	//todo: remove files
+
 	internal.HandleError(err)
 
 	written, err := io.Copy(f, httpPayloadReader)
@@ -106,7 +118,9 @@ func printJob(request *goipp.Message, httpPayloadReader io.Reader) *goipp.Messag
 
 	job, _ := jobprocessor.CreateDraftJob(request.Job)
 	// todo: handle error from create job
-	job.AttachDocument("/tmp/f.pdf")
+
+	job.AddDocument(filename, printingdata.DocumentTypePDF)
+	job.SetState(printingdata.JobStatePosted)
 
 	return response
 }

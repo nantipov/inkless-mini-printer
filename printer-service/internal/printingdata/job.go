@@ -18,18 +18,28 @@ const (
 	JobStatePrinted
 	JobStateCompleted
 	JobStateFailed
+
+	DocumentTypePDF    = "application/pdf"
+	DocumentTypeRaster = "application/raster" //todo: revisit mime type
 )
 
+type IppDocument struct {
+	Filename     string
+	DocumentType string
+}
+
 type IppData struct {
-	Id uint32
+	Id        uint32
+	Documents []IppDocument
 }
 
 type Job struct {
 	Id    string
 	State JobState
 	Error error
-	mutex sync.RWMutex
 	Ipp   IppData
+	Pages []*SketchedPage
+	mutex sync.RWMutex
 }
 
 var (
@@ -46,8 +56,10 @@ func NewDraftJob() Job {
 	}
 }
 
-func (j *Job) AttachDocument(filename string) {
-	//todo: content-type?
+func (j *Job) AddDocument(filename string, documentType string) {
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	j.Ipp.Documents = append(j.Ipp.Documents, IppDocument{Filename: filename, DocumentType: documentType})
 }
 
 func (j *Job) GetState(state JobState) JobState {
