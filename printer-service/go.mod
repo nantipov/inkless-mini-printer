@@ -33,6 +33,7 @@ require (
 	golang.org/x/text v0.26.0 // indirect
 	modernc.org/knuth v0.5.5 // indirect
 	modernc.org/token v1.1.0 // indirect
+	seehuhn.de/go/dag v0.0.0-20230612165854-b02059e84ec5 // indirect
 	seehuhn.de/go/geom v0.6.0 // indirect
 	seehuhn.de/go/icc v0.0.0-20240801195843-cfc244e2c55a // indirect
 	seehuhn.de/go/pdf v0.6.0 // indirect
