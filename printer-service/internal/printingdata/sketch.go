@@ -13,7 +13,7 @@ type SketchedPage struct {
 
 func NewSketch() *SketchedPage {
 	// todo: paper size in mm, e.g. A4; create Sketch from Job
-	c := canvas.New(10.0, 10.0)
+	c := canvas.New(canvas.A4.W, canvas.A4.H)
 	return &SketchedPage{
 		Canvas:      c,
 		DrawContext: canvas.NewContext(c),
