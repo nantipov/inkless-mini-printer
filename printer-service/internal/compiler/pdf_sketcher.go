@@ -20,6 +20,8 @@ import (
 
 type pdfContext struct {
 	tm []float64
+	ctm []float64 //todo: use canvas types?
+	linePoint canvas.Point
 	contentsReader *reader.Reader
 }
 
@@ -90,13 +92,15 @@ func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op st
 	//todo: draw PDF structures in Canvas/Context
 	printArgs(op, args)
 	switch op {
+	case "cm":
+		pdfc.addCtm(args)
 	case "Tm":
 		pdfc.setTm(args)
 	// case "Tf":
-		
+	//todo: calculate matrix
 	case "Tj":
-		x := pdfc.tm[4] / resolutionDpi // todo: read 72 from user-space
-		y := pdfc.tm[5] / resolutionDpi // todo: read 72 from user-space
+		x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
+		y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
 		size := pdfc.tm[0]
 
 		face := getFontFace(pdfc.contentsReader.TextFont, size)
@@ -118,8 +122,8 @@ func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op st
 		log.Printf("text '%s' at (%f, %f), size %f", textValue, x, y, size)
 	case "TJ":
 		//todo duplicated code
-		x := pdfc.tm[4] / resolutionDpi // todo: read 72 from user-space
-		y := pdfc.tm[5] / resolutionDpi // todo: read 72 from user-space
+		x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
+		y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
 		size := pdfc.tm[0]
 
 		face := getFontFace(pdfc.contentsReader.TextFont, size)
@@ -144,6 +148,12 @@ func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op st
 			//textLine.RenderAsPath(sketchedPage.Canvas, canvas.Identity, canvas.DPI(resolutionDpi)) //todo: resoultion
 			log.Printf("text '%s' at (%f, %f), size %f", textValue, x, y, size)
 		}
+	case "m":
+		pdfc.setLinePoint(args)
+		sketchedPage.DrawContext.MoveTo(pdfc.linePoint.X / resolutionDpi, pdfc.linePoint.Y / resolutionDpi)
+	case "l":
+		pdfc.setLinePoint(args)
+		sketchedPage.DrawContext.LineTo(pdfc.linePoint.X / resolutionDpi, pdfc.linePoint.Y / resolutionDpi)
 	}
 }
 
@@ -157,8 +167,21 @@ func printArgs(op string, args []pdf.Object) {
 	log.Printf("op = %s, args = %s", op, s)
 }
 
+func (pdfc *pdfContext) addCtm(args []pdf.Object) {
+	if len(pdfc.ctm) == 0 {
+		pdfc.ctm = make([]float64, len(args))
+	}
+	for i, arg := range args {
+		if tr, trok := arg.(pdf.Real); trok {
+			pdfc.ctm[i] = pdfc.ctm[i] + float64(tr)
+		} else if ti, tiok := arg.(pdf.Integer); tiok {
+			pdfc.ctm[i] = pdfc.ctm[i] + float64(ti)
+		}
+	}
+}
+
 func (pdfc *pdfContext) setTm(args []pdf.Object) {
-	printArgs(">>> tm", args)
+//	printArgs(">>> tm", args)
 	pdfc.tm = make([]float64, len(args))
 	for i, arg := range args {
 		if tr, trok := arg.(pdf.Real); trok {
@@ -169,6 +192,21 @@ func (pdfc *pdfContext) setTm(args []pdf.Object) {
 			pdfc.tm[i] = 0.0
 		}
 	}
+}
+
+func (pdfc *pdfContext) setLinePoint(args []pdf.Object) {
+	values := make([]float64, len(args))
+	for i, arg := range args {
+		if tr, trok := arg.(pdf.Real); trok {
+			values[i] = float64(tr)
+		} else if ti, tiok := arg.(pdf.Integer); tiok {
+			values[i] = float64(ti)
+		} else {
+			values[i] = 0.0
+		}
+	}
+	pdfc.linePoint.X = values[0]
+	pdfc.linePoint.Y = values[1]
 }
 
 
