@@ -20,6 +20,7 @@ func Compile(job *printingdata.Job) {
 
 	for _, document := range job.Ipp.Documents {
 		pages, _ := sketch(document) // todo: handle error
+		pages, _ = translateToGcode(pages)
 		job.Pages = append(job.Pages, pages...)
 	}
 

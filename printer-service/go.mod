@@ -1,6 +1,6 @@
 module nantipov/printerservice
 
-go 1.25.0
+go 1.25.1
 
 require (
 	codeberg.org/go-latex/latex v0.1.0 // indirect

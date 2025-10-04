@@ -18,19 +18,30 @@ import (
 	"github.com/tdewolff/canvas/renderers"
 )
 
-type pdfContext struct {
-	tm []float64
-	ctm []float64 //todo: use canvas types?
-	linePoint canvas.Point
-	contentsReader *reader.Reader
+type pdfGraphicsState struct {
+	ctm       canvas.Matrix
+	prevState *pdfGraphicsState
 }
 
-var (
-	defaultFontFamily *canvas.FontFamily = nil
-)
+type pdfContext struct {
+	graphicsState      *pdfGraphicsState
+	linePoint          canvas.Point
+	tm                 canvas.Matrix
+	textSize           float64
+	textFont           string
+	textCharacterSpace float64
+	contentsReader     *reader.Reader
+}
 
 const (
-	resolutionDpi = 300.0
+	resolutionDpiPDF = 72.0 // default user-space 72?
+	//todo: read user-space from the document
+)
+
+var (
+	defaultFontFamily   *canvas.FontFamily = nil
+	resolutionDpiOutput                    = 72.0 // canvas.DefaultResolution.DPI() // default user-space
+	resolutionOutput                       = canvas.DPI(resolutionDpiOutput)
 )
 
 func sketchFromPdf(document printingdata.IppDocument) ([]*printingdata.SketchedPage, error) {
@@ -61,7 +72,14 @@ func sketchFromPdf(document printingdata.IppDocument) ([]*printingdata.SketchedP
 
 	contentsReader := reader.New(pdfReader, nil)
 	pdfCtx := &pdfContext{
-		contentsReader: contentsReader,
+		graphicsState: &pdfGraphicsState{
+			ctm:       canvas.Identity,
+			prevState: nil,
+		},
+		tm:                 canvas.Identity,
+		textSize:           1.0,
+		textCharacterSpace: 1.0,
+		contentsReader:     contentsReader,
 	}
 	contentsReader.EveryOp = func(op string, args []pdf.Object) error {
 		adoptPdfOp(firstSketchedPage, pdfCtx, op, args)
@@ -83,27 +101,51 @@ func sketchFromPdf(document printingdata.IppDocument) ([]*printingdata.SketchedP
 
 	// firstSketchedPage.DrawContext.DrawPath(50.0, 50.0, canvas.Rectangle(50.0, 50.0))
 
-	renderers.Write("image.png", firstSketchedPage.Canvas, canvas.DPI(resolutionDpi))
+	renderers.Write("image.png", firstSketchedPage.Canvas, resolutionOutput)
 
 	return []*printingdata.SketchedPage{firstSketchedPage}, nil
 }
 
 func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op string, args []pdf.Object) {
-	//todo: draw PDF structures in Canvas/Context
 	printArgs(op, args)
 	switch op {
+	case "q":
+		pdfc.pushGS()
+	case "Q":
+		pdfc.popGS()
 	case "cm":
-		pdfc.addCtm(args)
+		pdfc.graphicsState.ctm = pdfc.graphicsState.ctm.Mul(toCanvasMatrix(args))
 	case "Tm":
-		pdfc.setTm(args)
-	// case "Tf":
-	//todo: calculate matrix
+		pdfc.tm = toCanvasMatrix(args)
+	case "Tf":
+		pdfc.textFont = string(args[0].(pdf.Name))
+		pdfc.textSize = toFloatNumbers(args)[1]
+	case "Tc":
+		//todo is it already read by the PDF library
+		pdfc.textCharacterSpace = toFloatNumbers(args)[0]
 	case "Tj":
-		x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
-		y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
-		size := pdfc.tm[0]
+		// x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
+		// y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
 
-		face := getFontFace(pdfc.contentsReader.TextFont, size)
+		// resultTm := pdfc.graphicsState.ctm.Mul(pdfc.tm)
+		// x, y := resultTm.Pos()
+		// size := resultTm[0][0] * pdfc.textSize / resolutionDpiPDF * resolutionDpiOutput
+
+		// x = x / resolutionDpiPDF * resolutionDpiOutput
+		// y = y / resolutionDpiPDF * resolutionDpiOutput
+
+		// x = x * resolutionDpiOutput
+		// y = y * resolutionDpiOutput
+
+		s := pdfc.contentsReader
+		M := matrix.Matrix{s.TextFontSize * s.TextHorizontalScaling, 0, 0, s.TextFontSize, 0, s.TextRise}
+		M = M.Mul(s.TextMatrix)
+		M = M.Mul(s.CTM)
+
+		x, y := pdfc.contentsReader.GetTextPositionDevice()
+		size := pdfc.contentsReader.TextFontSize * M[0]
+
+		face := getFontFace(pdfc.contentsReader.TextFont, size, color.Black)
 
 		textValue := ""
 
@@ -116,26 +158,38 @@ func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op st
 		}
 
 		textLine := canvas.NewTextLine(face, textValue, canvas.Top)
-		
-		sketchedPage.DrawContext.DrawText(x, y, textLine)
-		// textLine.RenderAsPath(sketchedPage.Canvas, canvas.Identity, canvas.DPI(resolutionDpi)) //todo: resoultion
+		// sketchedPage.DrawContext.DrawText(x, y, textLine)
+		textLine.RenderAsPath(sketchedPage.Canvas, pdfMatrixToCanvasMatrix(M), resolutionOutput) //todo: resoultion
 		log.Printf("text '%s' at (%f, %f), size %f", textValue, x, y, size)
 	case "TJ":
 		//todo duplicated code
-		x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
-		y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
-		size := pdfc.tm[0]
+		// x := (pdfc.ctm[4] * pdfc.tm[4]) / resolutionDpi // todo: read 72 from user-space
+		// y := (pdfc.ctm[5] * pdfc.tm[5]) / resolutionDpi // todo: read 72 from user-space
 
-		face := getFontFace(pdfc.contentsReader.TextFont, size)
+		// resultTm := pdfc.graphicsState.ctm.Mul(pdfc.tm)
+		// x, y := resultTm.Pos()
+		// size := resultTm[0][0] * pdfc.textSize / resolutionDpiPDF * resolutionDpiOutput
 
-	    textDataArray := args[0].(pdf.Array)
+		// y = y / resolutionDpiPDF * resolutionDpiOutput
+		// y = y * resolutionDpiOutput
+
+		s := pdfc.contentsReader
+		M := matrix.Matrix{s.TextFontSize * s.TextHorizontalScaling, 0, 0, s.TextFontSize, 0, s.TextRise}
+		M = M.Mul(s.TextMatrix)
+		M = M.Mul(s.CTM)
+
+		x, y := pdfc.contentsReader.GetTextPositionDevice()
+		size := pdfc.contentsReader.TextFontSize * M[0]
+
+		textDataArray := args[0].(pdf.Array)
 		for _, arg := range []pdf.Object(textDataArray) {
 			textValue := ""
 			if textPdfString, sok := arg.(pdf.String); sok {
 				textValue = string(textPdfString)
 			} else if textPdfInt, iok := arg.(pdf.Integer); iok {
 				delta := int(textPdfInt)
-				x = x + float64(delta) //todo: depends on text oritentation
+				// x = x + float64(delta)*pdfc.textCharacterSpace //todo: depends on text oritentation
+				x = x + float64(delta)*pdfc.contentsReader.TextCharacterSpacing*10.0 //todo: depends on text oritentation
 				continue
 			} else {
 				textWriter := new(strings.Builder)
@@ -143,17 +197,35 @@ func adoptPdfOp(sketchedPage *printingdata.SketchedPage, pdfc *pdfContext, op st
 				textValue = textWriter.String()
 			}
 
-			textLine := canvas.NewTextLine(face, textValue, canvas.Top)
-			sketchedPage.DrawContext.DrawText(x, y, textLine)
-			//textLine.RenderAsPath(sketchedPage.Canvas, canvas.Identity, canvas.DPI(resolutionDpi)) //todo: resoultion
-			log.Printf("text '%s' at (%f, %f), size %f", textValue, x, y, size)
+			// x0 := x / resolutionDpiPDF * resolutionDpiOutput
+			x0 := x
+			M[4] = x0
+			// x0 := x * resolutionDpiOutput
+
+			fontColor := color.RGBA{139, 44, 201, 255}
+			if textValue == "PDF" {
+				fontColor = color.RGBA{44, 78, 201, 255}
+			}
+
+			// size = 50.0
+			// textValue = "a"
+
+			face := getFontFace(pdfc.contentsReader.TextFont, size, fontColor)
+
+			textLine := canvas.NewTextLine(face, textValue, canvas.Left)
+			// sketchedPage.DrawContext.DrawText(x0, y, textLine)
+			textLine.RenderAsPath(sketchedPage.Canvas, pdfMatrixToCanvasMatrix(M), resolutionOutput) //todo: resoultion
+			r := canvas.Rectangle(size, size)
+			sketchedPage.DrawContext.SetStrokeColor(fontColor)
+			sketchedPage.DrawContext.DrawPath(x0, y, r)
+			log.Printf("text '%s' at (%f, %f), size %f", textValue, x0, y, size)
 		}
 	case "m":
 		pdfc.setLinePoint(args)
-		sketchedPage.DrawContext.MoveTo(pdfc.linePoint.X / resolutionDpi, pdfc.linePoint.Y / resolutionDpi)
+		sketchedPage.DrawContext.MoveTo(pdfc.linePoint.X/resolutionDpiPDF, pdfc.linePoint.Y/resolutionDpiPDF)
 	case "l":
 		pdfc.setLinePoint(args)
-		sketchedPage.DrawContext.LineTo(pdfc.linePoint.X / resolutionDpi, pdfc.linePoint.Y / resolutionDpi)
+		sketchedPage.DrawContext.LineTo(pdfc.linePoint.X/resolutionDpiPDF, pdfc.linePoint.Y/resolutionDpiPDF)
 	}
 }
 
@@ -167,31 +239,34 @@ func printArgs(op string, args []pdf.Object) {
 	log.Printf("op = %s, args = %s", op, s)
 }
 
-func (pdfc *pdfContext) addCtm(args []pdf.Object) {
-	if len(pdfc.ctm) == 0 {
-		pdfc.ctm = make([]float64, len(args))
-	}
+func toFloatNumbers(args []pdf.Object) []float64 {
+	m := make([]float64, len(args))
 	for i, arg := range args {
 		if tr, trok := arg.(pdf.Real); trok {
-			pdfc.ctm[i] = pdfc.ctm[i] + float64(tr)
+			m[i] = float64(tr)
 		} else if ti, tiok := arg.(pdf.Integer); tiok {
-			pdfc.ctm[i] = pdfc.ctm[i] + float64(ti)
+			m[i] = float64(ti)
 		}
 	}
+	return m
 }
 
-func (pdfc *pdfContext) setTm(args []pdf.Object) {
-//	printArgs(">>> tm", args)
-	pdfc.tm = make([]float64, len(args))
-	for i, arg := range args {
-		if tr, trok := arg.(pdf.Real); trok {
-			pdfc.tm[i] = float64(tr)
-		} else if ti, tiok := arg.(pdf.Integer); tiok {
-			pdfc.tm[i] = float64(ti)
-		} else {
-			pdfc.tm[i] = 0.0
-		}
+func toCanvasMatrix(args []pdf.Object) canvas.Matrix {
+	m := toFloatNumbers(args)
+	m1 := canvas.Matrix{
+		{m[0], m[1], m[4]},
+		{m[2], m[3], m[5]},
 	}
+	return m1
+}
+
+func pdfMatrixToCanvasMatrix(pdfMatrix matrix.Matrix) canvas.Matrix {
+	m := pdfMatrix
+	m1 := canvas.Matrix{
+		{m[0], m[1], m[4]},
+		{m[2], m[3], m[5]},
+	}
+	return m1
 }
 
 func (pdfc *pdfContext) setLinePoint(args []pdf.Object) {
@@ -209,10 +284,9 @@ func (pdfc *pdfContext) setLinePoint(args []pdf.Object) {
 	pdfc.linePoint.Y = values[1]
 }
 
-
 // todo: pre load fallback / default font family on application startup
 // todo: cache already loaded fonts
-func getFontFace(pdfFont font.Embedded, size float64) *canvas.FontFace {
+func getFontFace(pdfFont font.Embedded, size float64, fontColor color.Color) *canvas.FontFace {
 	// family := canvas.NewFontFamily("f")
 
 	if fontFile, ok := pdfFont.(font.FromFile); ok {
@@ -234,7 +308,7 @@ func getFontFace(pdfFont font.Embedded, size float64) *canvas.FontFace {
 	// 	log.Panic(err)
 	// }
 
-	return getDefaultFamily().Face(size, color.Black)
+	return getDefaultFamily().Face(size, fontColor, canvas.FontRegular)
 }
 
 func getDefaultFamily() *canvas.FontFamily {
@@ -249,4 +323,16 @@ func getDefaultFamily() *canvas.FontFamily {
 
 	defaultFontFamily = family
 	return family
+}
+
+func (pdfc *pdfContext) pushGS() {
+	newgs := &pdfGraphicsState{
+		ctm:       canvas.Identity, // pdfc.graphicsState.ctm,
+		prevState: pdfc.graphicsState,
+	}
+	pdfc.graphicsState = newgs
+}
+
+func (pdfc *pdfContext) popGS() {
+	pdfc.graphicsState = pdfc.graphicsState.prevState
 }
